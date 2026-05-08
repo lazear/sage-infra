@@ -118,6 +118,11 @@ function app() {
     fmtDuration(s) { if (s == null) return '—'; if (s < 60) return s.toFixed(1) + 's'; const m = Math.floor(s/60), r = Math.round(s%60); return `${m}m ${r}s`; },
     fmtMem(kb) { if (kb == null) return '—'; const gb = kb/1024/1024; return gb.toFixed(2) + ' GB'; },
     fmtDate(s) { if (!s) return '—'; const d = new Date(s); return d.toLocaleString(); },
+    statusText(run) {
+      if (run?.missing_result) return 'MISSING';
+      if (run?.exit_code === 0) return 'OK';
+      return run?.exit_code == null ? 'FAILED' : `FAILED (${run.exit_code})`;
+    },
   };
 }
 

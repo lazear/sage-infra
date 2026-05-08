@@ -55,7 +55,7 @@
               <div><dt>throughput</dt><dd><span x-text="fmt(run.throughput_spectra_per_sec)"></span> sp/s</dd></div>
               <div :class="{ ok: run.exit_code === 0, fail: run.exit_code !== 0 }">
                 <dt>status</dt>
-                <dd x-text="run.exit_code === 0 ? 'OK' : 'FAILED (' + run.exit_code + ')'"></dd>
+                <dd x-text="statusText(run)"></dd>
               </div>
             </dl>
           </template>
@@ -117,7 +117,7 @@
               <td class="num" x-text="fmt(r.proteins)"></td>
               <td class="num" x-text="fmtDuration(r.duration_seconds)"></td>
               <td class="num" x-text="fmtMem(r.peak_memory_kb)"></td>
-              <td x-text="r.exit_code === 0 ? 'OK' : 'FAILED'"></td>
+              <td x-text="statusText(r)"></td>
             </tr>
           </template>
         </tbody>

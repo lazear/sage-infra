@@ -115,7 +115,12 @@ jobs:
       - name: Stage configs to S3 + build dataset matrix
         id: datasets
         env:
-          SHA: ${{ steps.meta.outputs.sha }}
+          SHA:               ${{ steps.meta.outputs.sha }}
+          MSG:               ${{ steps.meta.outputs.message }}
+          AUTHOR:            ${{ steps.meta.outputs.author }}
+          TS:                ${{ steps.meta.outputs.timestamp }}
+          IMAGE_URI:         ${{ steps.image.outputs.image_uri }}
+          SAGE_INFRA_COMMIT: ${{ github.sha }}
         run: |
           set -euo pipefail
           shopt -s nullglob
@@ -136,6 +141,32 @@ jobs:
           LIST=$(printf '%s\n' "${DATASETS[@]}" | jq -R . | jq -sc .)
           echo "list=$LIST" >> "$GITHUB_OUTPUT"
           echo "datasets to run: $LIST"
+
+          jq -n \
+            --arg commit "$SHA" \
+            --arg commitShort "${SHA:0:7}" \
+            --arg sageRepo "$SAGE_REPO" \
+            --arg msg "$MSG" \
+            --arg author "$AUTHOR" \
+            --arg ts "$TS" \
+            --arg image "$IMAGE_URI" \
+            --arg infraCommit "$SAGE_INFRA_COMMIT" \
+            --argjson datasets "$LIST" \
+            '{
+              schema_version: 1,
+              commit: $commit,
+              commit_short: $commitShort,
+              commit_url: ("https://github.com/" + $sageRepo + "/commit/" + $commit),
+              commit_message: $msg,
+              commit_author: $author,
+              commit_timestamp: $ts,
+              image_uri: $image,
+              sage_infra_commit: $infraCommit,
+              datasets: $datasets
+            }' > /tmp/sage-infra-manifest.json
+          aws s3 cp /tmp/sage-infra-manifest.json \
+            "s3://${RESULTS_BUCKET}/manifests/${SHA}.json" \
+            --content-type application/json
 
       - name: Register Batch job-definition revision
         id: regdef
