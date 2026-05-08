@@ -1,0 +1,8 @@
+description: Simulated HeLa dataset
+reference: "SAGEBench datasets: simulated TIMS-TOF DDA fixtures for the Sage search engine. Zenodo. https://doi.org/10.5281/zenodo.20089515"
+batch:
+  vcpu: 4
+  memory_mib: 8192
+tags:
+  - timstof
+  - simulated

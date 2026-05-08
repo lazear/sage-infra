@@ -1,6 +1,7 @@
 .env
 .env.*
 !.env.example
+**/__pycache__
 
 # Old pipeline (its own repo, kept here during cutover)
 sage-pipeline/

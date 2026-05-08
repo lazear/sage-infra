@@ -2,10 +2,10 @@
 """sage-infra runner wrapper.
 
 Invoked inside the Docker image by AWS Batch. Reads commit + dataset metadata
-from env vars, hands sage the s3:// URI of the dataset's config.json (sage
-reads it directly via its cloudpath layer), parses identification + runtime
-metrics from sage's stderr, and uploads a per-(commit, dataset) result JSON
-+ log + raw outputs to the results bucket.
+from env vars, stages Bruker .d directory inputs locally when needed, hands
+sage either the staged s3:// config URI or a rewritten local config, parses
+identification + runtime metrics from sage's stderr, and uploads a
+per-(commit, dataset) result JSON + log + raw outputs to the results bucket.
 
 Sage already self-reports the metrics we care about (see
 sage/crates/sage-cli/src/main.rs:212, 411, 427-432, 502), so we read its log
@@ -25,10 +25,13 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import boto3
 
 SCHEMA_VERSION = 1
+LOCAL_CONFIG = Path("/scratch/config.json")
+SCRATCH_INPUTS = Path("/scratch/inputs")
 SCRATCH_OUT = Path("/scratch/out")
 LOG_PATH = Path("/scratch/sage.log")
 
@@ -71,6 +74,78 @@ def run_sage(config_uri: str) -> tuple[int, str, float, int]:
     peak_kb = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
 
     return rc, "".join(chunks), wall, peak_kb
+
+
+def parse_s3_uri(uri: str) -> tuple[str, str]:
+    parsed = urlparse(uri)
+    if parsed.scheme != "s3" or not parsed.netloc or not parsed.path:
+        raise ValueError(f"not an s3 URI: {uri}")
+    return parsed.netloc, parsed.path.lstrip("/")
+
+
+def is_bruker_s3_dir(value: str) -> bool:
+    if not value.startswith("s3://"):
+        return False
+    _, key = parse_s3_uri(value)
+    return key.rstrip("/").lower().endswith(".d")
+
+
+def sync_s3_prefix(s3, uri: str, destination: Path) -> None:
+    bucket, key = parse_s3_uri(uri)
+    prefix = key.rstrip("/") + "/"
+    destination.mkdir(parents=True, exist_ok=True)
+    print(f"[wrapper] syncing Bruker directory {uri} -> {destination}", flush=True)
+
+    object_count = 0
+    paginator = s3.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+        for obj in page.get("Contents", []):
+            object_key = obj["Key"]
+            if object_key.endswith("/"):
+                continue
+            rel = object_key[len(prefix):]
+            target = destination / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            s3.download_file(bucket, object_key, str(target))
+            object_count += 1
+
+    if object_count == 0:
+        raise RuntimeError(f"no S3 objects found under Bruker directory prefix: {uri}")
+    print(f"[wrapper] synced {object_count} objects from {uri}", flush=True)
+
+
+def stage_bruker_inputs(s3, config_uri: str) -> str:
+    """Download and rewrite config only when it references S3 Bruker .d dirs."""
+    bucket, key = parse_s3_uri(config_uri)
+    cfg = json.loads(s3.get_object(Bucket=bucket, Key=key)["Body"].read())
+    staged: dict[str, str] = {}
+
+    def rewrite(value: Any) -> Any:
+        if isinstance(value, str) and is_bruker_s3_dir(value):
+            if value not in staged:
+                _, bruker_key = parse_s3_uri(value)
+                dirname = Path(bruker_key.rstrip("/")).name
+                local_dir = SCRATCH_INPUTS / f"{len(staged):03d}_{dirname}"
+                sync_s3_prefix(s3, value, local_dir)
+                staged[value] = str(local_dir)
+            return staged[value]
+        if isinstance(value, list):
+            return [rewrite(item) for item in value]
+        if isinstance(value, dict):
+            return {k: rewrite(v) for k, v in value.items()}
+        return value
+
+    rewritten = rewrite(cfg)
+    if not staged:
+        return config_uri
+
+    LOCAL_CONFIG.parent.mkdir(parents=True, exist_ok=True)
+    LOCAL_CONFIG.write_text(json.dumps(rewritten, indent=2) + "\n", encoding="utf-8")
+    print(
+        f"[wrapper] wrote local config with {len(staged)} staged Bruker directories: {LOCAL_CONFIG}",
+        flush=True,
+    )
+    return str(LOCAL_CONFIG)
 
 
 # Match Sage's own stderr lines. Patterns are anchored on the substantive
@@ -153,8 +228,9 @@ def main() -> int:
     # Configs live in git and are staged by the build job to a per-commit prefix.
     cfg_uri = f"s3://{data_bucket}/staging/{commit}/{dataset}/config.json"
     print(f"[wrapper] config: {cfg_uri}", flush=True)
+    sage_config = stage_bruker_inputs(s3, cfg_uri)
     version_str = sage_version()
-    exit_code, log, wall_seconds, peak_kb = run_sage(cfg_uri)
+    exit_code, log, wall_seconds, peak_kb = run_sage(sage_config)
     ended_at = now_iso()
     metrics = parse_metrics(log)
 

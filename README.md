@@ -51,6 +51,8 @@ Adding a dataset = uploading the heavy files once, then a PR. Removing one = del
 
 The benchmark workflow stages each `config.json` to `s3://<data-bucket>/staging/<sage-commit>/<PXD>/config.json` per run, so a Sage commit is always benchmarked against the config that was committed at that moment in `sage-infra` history (recorded as `sage_infra_commit` in the result JSON).
 
+Bruker `.d` inputs may also be listed as S3 directories in `config.json`, for example `s3://${DATA_BUCKET}/datasets/${PXD}/sample01.d`. The Batch wrapper detects S3 paths ending in `.d`, syncs those directory prefixes into `/scratch/inputs`, writes a local rewritten config for the job, and then runs Sage against that local config. Other S3 paths, such as mzML files and FASTA files, are left unchanged.
+
 ## Bootstrapping
 
 > **Heads up**: `cdk synth` / `cdk diff` perform AZ context lookups against the
