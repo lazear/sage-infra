@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>sage-infra</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='14' font-size='14'%3E🌿%3C/text%3E%3C/svg%3E" />
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+</head>
+<body x-data="app()" x-init="init()">
+
+  <header>
+    <h1>sage-infra</h1>
+    <div class="meta">
+      <span>last refresh: <span x-text="lastRefresh || '…'"></span></span>
+      <span>·</span>
+      <span><span x-text="docs.length"></span> runs</span>
+      <span>·</span>
+      <span><span x-text="datasets.length"></span> datasets</span>
+      <span>·</span>
+      <a :href="'https://github.com/' + sageRepo" target="_blank" x-text="sageRepo"></a>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button :class="{active: tab === 'latest'}"  @click="tab = 'latest'">latest</button>
+    <button :class="{active: tab === 'history'}" @click="tab = 'history'">history</button>
+    <button :class="{active: tab === 'table'}"   @click="tab = 'table'">table</button>
+  </nav>
+
+  <main>
+    <!-- LATEST -->
+    <section x-show="tab === 'latest'" class="latest">
+      <template x-for="ds in datasets" :key="ds">
+        <article class="card" x-data="{ run: latestByDataset[ds] }">
+          <header class="card-head">
+            <h2 x-text="ds"></h2>
+            <a class="commit-pill"
+               :href="run?.commit_url"
+               target="_blank"
+               x-text="run?.commit_short || '—'"
+               :title="run?.commit_message"></a>
+          </header>
+          <template x-if="run">
+            <dl class="metrics">
+              <div><dt>PSMs (1% FDR)</dt><dd x-text="fmt(run.psms_1pct_fdr)"></dd></div>
+              <div><dt>peptides</dt><dd x-text="fmt(run.peptides_1pct_fdr)"></dd></div>
+              <div><dt>proteins</dt><dd x-text="fmt(run.proteins_1pct_fdr)"></dd></div>
+              <div><dt>runtime</dt><dd x-text="fmtDuration(run.duration_seconds)"></dd></div>
+              <div><dt>peak RSS</dt><dd x-text="fmtMem(run.peak_memory_kb)"></dd></div>
+              <div><dt>throughput</dt><dd><span x-text="fmt(run.throughput_spectra_per_sec)"></span> sp/s</dd></div>
+              <div :class="{ ok: run.exit_code === 0, fail: run.exit_code !== 0 }">
+                <dt>status</dt>
+                <dd x-text="run.exit_code === 0 ? 'OK' : 'FAILED (' + run.exit_code + ')'"></dd>
+              </div>
+            </dl>
+          </template>
+          <template x-if="!run">
+            <p class="empty">no runs yet</p>
+          </template>
+        </article>
+      </template>
+    </section>
+
+    <!-- HISTORY -->
+    <section x-show="tab === 'history'" class="history">
+      <template x-for="ds in datasets" :key="ds">
+        <article class="dataset-block">
+          <h2 x-text="ds"></h2>
+          <div class="chart-row">
+            <div class="chart"><canvas :id="'chart-psms-' + ds"></canvas></div>
+            <div class="chart"><canvas :id="'chart-time-' + ds"></canvas></div>
+            <div class="chart"><canvas :id="'chart-mem-' + ds"></canvas></div>
+          </div>
+        </article>
+      </template>
+    </section>
+
+    <!-- TABLE -->
+    <section x-show="tab === 'table'" class="table-wrap">
+      <div class="filters">
+        <label>dataset
+          <select x-model="filterDataset">
+            <option value="">all</option>
+            <template x-for="ds in datasets" :key="ds">
+              <option :value="ds" x-text="ds"></option>
+            </template>
+          </select>
+        </label>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th @click="sortBy('commit_timestamp')">when</th>
+            <th @click="sortBy('commit')">commit</th>
+            <th @click="sortBy('dataset')">dataset</th>
+            <th @click="sortBy('psms_1pct_fdr')" class="num">PSMs</th>
+            <th @click="sortBy('peptides_1pct_fdr')" class="num">peptides</th>
+            <th @click="sortBy('proteins_1pct_fdr')" class="num">proteins</th>
+            <th @click="sortBy('duration_seconds')" class="num">runtime</th>
+            <th @click="sortBy('peak_memory_kb')" class="num">RSS</th>
+            <th>status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="r in tableRows" :key="r.commit + ':' + r.dataset">
+            <tr :class="{ fail: r.exit_code !== 0 }">
+              <td x-text="fmtDate(r.commit_timestamp || r.started_at)"></td>
+              <td><a :href="r.commit_url" target="_blank" x-text="r.commit_short" :title="r.commit_message"></a></td>
+              <td x-text="r.dataset"></td>
+              <td class="num" x-text="fmt(r.psms_1pct_fdr)"></td>
+              <td class="num" x-text="fmt(r.peptides_1pct_fdr)"></td>
+              <td class="num" x-text="fmt(r.proteins_1pct_fdr)"></td>
+              <td class="num" x-text="fmtDuration(r.duration_seconds)"></td>
+              <td class="num" x-text="fmtMem(r.peak_memory_kb)"></td>
+              <td x-text="r.exit_code === 0 ? 'OK' : 'FAILED'"></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

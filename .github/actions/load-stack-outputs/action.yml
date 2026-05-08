@@ -1,0 +1,36 @@
+name: Load sage-infra stack outputs
+description: >
+  Reads CloudFormation outputs from the sage-infra stack and writes them to
+  $GITHUB_ENV so subsequent steps can use them as plain env vars. Requires
+  AWS credentials to be already configured.
+
+inputs:
+  stack-name:
+    description: CloudFormation stack name
+    required: false
+    default: SageInfraStack
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        STACK_NAME: ${{ inputs.stack-name }}
+      run: |
+        set -euo pipefail
+        OUTS=$(aws cloudformation describe-stacks \
+                 --stack-name "$STACK_NAME" \
+                 --query 'Stacks[0].Outputs' --output json)
+        get() { jq -r --arg k "$1" '.[] | select(.OutputKey == $k) | .OutputValue' <<<"$OUTS"; }
+        {
+          echo "ECR_REPO=$(get OutEcrRepoUri)"
+          echo "DATA_BUCKET=$(get OutDataBucket)"
+          echo "RESULTS_BUCKET=$(get OutResultsBucket)"
+          echo "CLOUDFRONT_ID=$(get OutCloudFrontId)"
+          echo "CLOUDFRONT_URL=$(get OutCloudFrontUrl)"
+          echo "BATCH_QUEUE=$(get OutBatchQueue)"
+          echo "BATCH_JOB_DEF=$(get OutBatchJobDef)"
+          echo "TASK_ROLE_ARN=$(get OutTaskRoleArn)"
+          echo "EXECUTION_ROLE_ARN=$(get OutExecutionRoleArn)"
+          echo "SAGE_REPO_FROM_STACK=$(get OutSageRepo)"
+        } >> "$GITHUB_ENV"

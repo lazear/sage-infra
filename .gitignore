@@ -1,2 +1,23 @@
 .env
+.env.*
+!.env.example
+
+# Old pipeline (its own repo, kept here during cutover)
 sage-pipeline/
+
+# CDK
+infra/node_modules/
+infra/cdk.out/
+infra/cdk.context.json
+infra/*.js
+infra/*.d.ts
+!infra/jest.config.js
+
+# Build artefacts
+target/
+*.tar.gz
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/

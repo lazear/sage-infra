@@ -1,0 +1,287 @@
+name: benchmark
+
+on:
+  repository_dispatch:
+    types: [sage-master-push]
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: "Sage commit SHA to benchmark"
+        required: true
+        type: string
+
+permissions:
+  id-token: write   # OIDC -> AWS
+  contents: read
+
+concurrency:
+  group: sage-infra-${{ github.event.client_payload.sha || inputs.commit }}
+  cancel-in-progress: false
+
+env:
+  SAGE_REPO:    ${{ vars.SAGE_REPO || 'lazear/sage' }}
+  AWS_REGION:   ${{ vars.AWS_REGION }}
+  AWS_ROLE_ARN: ${{ vars.AWS_BENCHMARK_ROLE_ARN }}
+  STACK_NAME:   ${{ vars.STACK_NAME || 'SageInfraStack' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      sha:      ${{ steps.meta.outputs.sha }}
+      jobdef:   ${{ steps.regdef.outputs.jobdef }}
+      datasets: ${{ steps.datasets.outputs.list }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve commit metadata
+        id: meta
+        env:
+          GH_TOKEN:     ${{ secrets.GITHUB_TOKEN }}
+          EVENT_NAME:   ${{ github.event_name }}
+          PAYLOAD_SHA:  ${{ github.event.client_payload.sha }}
+          PAYLOAD_MSG:  ${{ github.event.client_payload.message }}
+          PAYLOAD_AUTH: ${{ github.event.client_payload.author }}
+          PAYLOAD_TS:   ${{ github.event.client_payload.timestamp }}
+          INPUT_COMMIT: ${{ inputs.commit }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "repository_dispatch" ]; then
+            SHA="$PAYLOAD_SHA"; MSG="$PAYLOAD_MSG"
+            AUTHOR="$PAYLOAD_AUTH"; TS="$PAYLOAD_TS"
+          else
+            SHA="$INPUT_COMMIT"
+            META=$(gh api "repos/${SAGE_REPO}/commits/${SHA}")
+            MSG=$(echo "$META"   | jq -r '.commit.message | split("\n")[0]')
+            AUTHOR=$(echo "$META" | jq -r '.commit.author.name')
+            TS=$(echo "$META"    | jq -r '.commit.author.date')
+          fi
+          [ -n "$SHA" ] || { echo "no commit provided"; exit 1; }
+          {
+            echo "sha=$SHA"
+            echo "message<<__SCI_EOF__"; echo "$MSG"; echo "__SCI_EOF__"
+            echo "author=$AUTHOR"
+            echo "timestamp=$TS"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Checkout sage @ ${{ steps.meta.outputs.sha }}
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.SAGE_REPO }}
+          ref: ${{ steps.meta.outputs.sha }}
+          path: sage
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: sage -> target
+          shared-key: sage-infra
+
+      - uses: mozilla-actions/sccache-action@v0.0.6
+
+      - name: Build sage release
+        env:
+          RUSTC_WRAPPER: sccache
+          SCCACHE_GHA_ENABLED: "true"
+        working-directory: sage
+        run: |
+          set -euo pipefail
+          cargo build --release --target x86_64-unknown-linux-gnu --bin sage
+          cp target/x86_64-unknown-linux-gnu/release/sage ../runner/sage
+          ls -lh ../runner/sage
+
+      - name: Configure AWS via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region:     ${{ env.AWS_REGION }}
+
+      - uses: ./.github/actions/load-stack-outputs
+        with:
+          stack-name: ${{ env.STACK_NAME }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build & push runner image
+        id: image
+        env:
+          SHA: ${{ steps.meta.outputs.sha }}
+        run: |
+          set -euo pipefail
+          IMAGE_URI="${ECR_REPO}:sha-${SHA}"
+          docker build -t "$IMAGE_URI" runner/
+          docker push "$IMAGE_URI"
+          echo "image_uri=$IMAGE_URI" >> "$GITHUB_OUTPUT"
+
+      - name: Register Batch job-definition revision
+        id: regdef
+        env:
+          SHA:       ${{ steps.meta.outputs.sha }}
+          IMAGE_URI: ${{ steps.image.outputs.image_uri }}
+          MSG:       ${{ steps.meta.outputs.message }}
+          AUTHOR:    ${{ steps.meta.outputs.author }}
+          TS:        ${{ steps.meta.outputs.timestamp }}
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg image "$IMAGE_URI" \
+            --arg jobRole "$TASK_ROLE_ARN" \
+            --arg execRole "$EXECUTION_ROLE_ARN" \
+            --arg dataBucket "$DATA_BUCKET" \
+            --arg resultsBucket "$RESULTS_BUCKET" \
+            --arg sageRepo "$SAGE_REPO" \
+            --arg commit "$SHA" \
+            --arg msg "$MSG" \
+            --arg author "$AUTHOR" \
+            --arg ts "$TS" \
+            '{
+              image: $image,
+              command: ["python3","/usr/local/bin/wrapper.py"],
+              jobRoleArn: $jobRole,
+              executionRoleArn: $execRole,
+              fargatePlatformConfiguration: { platformVersion: "LATEST" },
+              networkConfiguration: { assignPublicIp: "ENABLED" },
+              resourceRequirements: [
+                { type: "VCPU",   value: "4" },
+                { type: "MEMORY", value: "30720" }
+              ],
+              runtimePlatform: {
+                cpuArchitecture: "X86_64",
+                operatingSystemFamily: "LINUX"
+              },
+              ephemeralStorage: { sizeInGiB: 100 },
+              environment: [
+                { name: "DATA_BUCKET",      value: $dataBucket },
+                { name: "RESULTS_BUCKET",   value: $resultsBucket },
+                { name: "SAGE_REPO",        value: $sageRepo },
+                { name: "IMAGE_URI",        value: $image },
+                { name: "COMMIT",           value: $commit },
+                { name: "COMMIT_MESSAGE",   value: $msg },
+                { name: "COMMIT_AUTHOR",    value: $author },
+                { name: "COMMIT_TIMESTAMP", value: $ts }
+              ]
+            }' > /tmp/container.json
+
+          REV=$(aws batch register-job-definition \
+              --job-definition-name "$BATCH_JOB_DEF" \
+              --type container \
+              --platform-capabilities FARGATE \
+              --container-properties file:///tmp/container.json \
+              --propagate-tags \
+              --timeout 'attemptDurationSeconds=14400' \
+              --retry-strategy 'attempts=2' \
+              --query 'revision' --output text)
+          echo "jobdef=${BATCH_JOB_DEF}:${REV}" >> "$GITHUB_OUTPUT"
+
+      - name: Read dataset list
+        id: datasets
+        run: |
+          set -euo pipefail
+          aws s3 cp "s3://${DATA_BUCKET}/datasets/index.json" /tmp/datasets.json
+          LIST=$(jq -c '[.[].id]' /tmp/datasets.json)
+          echo "list=$LIST" >> "$GITHUB_OUTPUT"
+          echo "datasets to run: $LIST"
+
+  run:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        dataset: ${{ fromJSON(needs.build.outputs.datasets) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region:     ${{ env.AWS_REGION }}
+
+      - uses: ./.github/actions/load-stack-outputs
+        with:
+          stack-name: ${{ env.STACK_NAME }}
+
+      - name: Submit Batch job for ${{ matrix.dataset }}
+        id: submit
+        env:
+          DATASET: ${{ matrix.dataset }}
+          JOBDEF:  ${{ needs.build.outputs.jobdef }}
+          SHA:     ${{ needs.build.outputs.sha }}
+        run: |
+          set -euo pipefail
+          SHORT="${SHA:0:7}"
+          OVERRIDES=$(jq -nc --arg ds "$DATASET" \
+            '{ environment: [ { name: "DATASET", value: $ds } ] }')
+          JOB_ID=$(aws batch submit-job \
+              --job-name "sage-infra-${SHORT}-${DATASET}" \
+              --job-queue "$BATCH_QUEUE" \
+              --job-definition "$JOBDEF" \
+              --container-overrides "$OVERRIDES" \
+              --query 'jobId' --output text)
+          echo "Submitted $JOB_ID"
+          echo "job_id=$JOB_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for completion
+        env:
+          JOB_ID: ${{ steps.submit.outputs.job_id }}
+        run: |
+          set -euo pipefail
+          while :; do
+            STATUS=$(aws batch describe-jobs --jobs "$JOB_ID" \
+                       --query 'jobs[0].status' --output text)
+            echo "[$(date -u +%H:%M:%S)] $JOB_ID -> $STATUS"
+            case "$STATUS" in
+              SUCCEEDED) exit 0 ;;
+              FAILED)
+                aws batch describe-jobs --jobs "$JOB_ID" \
+                  --query 'jobs[0].{reason:statusReason,exit:container.exitCode,log:container.logStreamName}' \
+                  --output table
+                exit 1
+                ;;
+              *) sleep 30 ;;
+            esac
+          done
+
+  finalize:
+    needs: [build, run]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region:     ${{ env.AWS_REGION }}
+
+      - uses: ./.github/actions/load-stack-outputs
+        with:
+          stack-name: ${{ env.STACK_NAME }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - run: pip install boto3
+
+      - name: Rebuild index.json
+        run: python3 scripts/rebuild_index.py "$RESULTS_BUCKET"
+
+      - name: Sync static site
+        run: |
+          aws s3 sync site/ "s3://${RESULTS_BUCKET}/site/" --delete \
+            --cache-control 'public, max-age=300'
+
+      - name: Invalidate CloudFront
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id "$CLOUDFRONT_ID" \
+            --paths '/' '/index.json' '/site/*'
