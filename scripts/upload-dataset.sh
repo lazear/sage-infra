@@ -19,8 +19,8 @@ DEST="s3://${DATA_BUCKET}/datasets/${DATASET}/"
 echo "→ $DEST"
 aws s3 sync "$LOCAL/" "$DEST" \
   --exclude '*' \
-  --include '*.mzML' --include '*.mzML.gz' --include '*.mzparquet' \
-  --include '*.fasta' --include '*.fasta.gz' \
+  --include '*.mzML.gz' \
+  --include '*.fasta' \
   --size-only
 
 echo
