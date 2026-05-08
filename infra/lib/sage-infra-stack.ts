@@ -201,10 +201,12 @@ export class SageInfraStack extends cdk.Stack {
       resources: [taskRole.roleArn, executionRole.roleArn],
     }));
 
-    // Deploy role (used by deploy-infra.yml) — broad perms, restricted to main.
+    // Deploy role (used by deploy-infra.yml) — broad perms, restricted to the
+    // default branch. Override `defaultBranch` in cdk.context.json for forks.
+    const defaultBranch = (this.node.tryGetContext('defaultBranch') as string | undefined) ?? 'master';
     const deployRole = new iam.Role(this, 'DeployRole', {
       roleName: 'sage-infra-deploy',
-      assumedBy: ghPrincipal(`repo:${props.ciRepo}:ref:refs/heads/main`),
+      assumedBy: ghPrincipal(`repo:${props.ciRepo}:ref:refs/heads/${defaultBranch}`),
       maxSessionDuration: Duration.hours(1),
       description: 'sage-infra deploy-infra.yml workflow role (cdk deploy)',
       managedPolicies: [iam.ManagedPolicy.fromAwsManagedPolicyName('AdministratorAccess')],
