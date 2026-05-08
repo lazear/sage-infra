@@ -76,10 +76,10 @@ def run_sage(config_uri: str) -> tuple[int, str, float, int]:
 # Match Sage's own stderr lines. Patterns are anchored on the substantive
 # text rather than the env_logger prefix so they survive logger format changes.
 _METRIC_PATTERNS = {
-    "psms":      re.compile(r"discovered\s+(\d+)\s+target peptide-spectrum matches at 1%\s*FDR"),
-    "peptides":  re.compile(r"discovered\s+(\d+)\s+target peptides at 1%\s*FDR"),
-    "proteins":  re.compile(r"discovered\s+(\d+)\s+target proteins at 1%\s*FDR"),
-    "protein_groups":  re.compile(r"discovered\s+(\d+)\s+target protein groups at 1%\s*FDR"),
+    "psms":      re.compile(r"discovered\s+(\d+)\s+target peptide-spectrum matches"),
+    "peptides":  re.compile(r"discovered\s+(\d+)\s+target peptides"),
+    "proteins":  re.compile(r"discovered\s+(\d+)\s+target proteins"),
+    "protein_groups":  re.compile(r"discovered\s+(\d+)\s+target protein groups"),
 }
 _SEARCH_PATTERN = re.compile(r"search:\s+(\d+)\s+ms\s+\((\d+)\s+spectra/s\)")
 _FINISHED_PATTERN = re.compile(r"finished in\s+(\d+(?:\.\d+)?)\s*s")
