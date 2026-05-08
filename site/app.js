@@ -77,7 +77,7 @@ function app() {
         commitUrl: r.commit_url,
       }));
 
-      this.makeChart(`chart-psms-${ds}`, 'PSMs (1% FDR)', points('psms_1pct_fdr'));
+      this.makeChart(`chart-psms-${ds}`, 'PSMs (1% FDR)', points('psms'));
       this.makeChart(`chart-time-${ds}`, 'runtime (s)',   points('duration_seconds'));
       this.makeChart(`chart-mem-${ds}`,  'peak RSS (GB)', points('peak_memory_kb').map(p => ({ ...p, y: p.y / 1024 / 1024 })));
     },

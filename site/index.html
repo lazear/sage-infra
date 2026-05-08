@@ -46,9 +46,10 @@
           </header>
           <template x-if="run">
             <dl class="metrics">
-              <div><dt>PSMs (1% FDR)</dt><dd x-text="fmt(run.psms_1pct_fdr)"></dd></div>
-              <div><dt>peptides</dt><dd x-text="fmt(run.peptides_1pct_fdr)"></dd></div>
-              <div><dt>proteins</dt><dd x-text="fmt(run.proteins_1pct_fdr)"></dd></div>
+              <div><dt>PSMs (1% FDR)</dt><dd x-text="fmt(run.psms)"></dd></div>
+              <div><dt>peptides</dt><dd x-text="fmt(run.peptides)"></dd></div>
+              <div><dt>proteins</dt><dd x-text="fmt(run.proteins)"></dd></div>
+              <div><dt>protein groups</dt><dd x-text="fmt(run.protein_groups)"></dd></div>
               <div><dt>runtime</dt><dd x-text="fmtDuration(run.duration_seconds)"></dd></div>
               <div><dt>peak RSS</dt><dd x-text="fmtMem(run.peak_memory_kb)"></dd></div>
               <div><dt>throughput</dt><dd><span x-text="fmt(run.throughput_spectra_per_sec)"></span> sp/s</dd></div>
