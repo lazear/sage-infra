@@ -51,15 +51,26 @@ def run_sage(config_uri: str) -> tuple[int, str, float, int]:
     print(f"[wrapper] $ {' '.join(cmd)}", flush=True)
 
     t0 = time.monotonic()
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    # Stream sage's combined stdout+stderr to our own stdout (visible in
+    # CloudWatch in real time) and tee to LOG_PATH for parsing + S3 upload.
+    proc = subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1,
+    )
+    chunks: list[str] = []
+    with open(LOG_PATH, "w") as logf:
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+            logf.write(line)
+            chunks.append(line)
+    rc = proc.wait()
     wall = time.monotonic() - t0
 
     # Linux: ru_maxrss is in KB. RUSAGE_CHILDREN tracks terminated children.
     peak_kb = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
 
-    log = (proc.stdout or "") + (proc.stderr or "")
-    LOG_PATH.write_text(log)
-    return proc.returncode, log, wall, peak_kb
+    return rc, "".join(chunks), wall, peak_kb
 
 
 # Match Sage's own stderr lines. Patterns are anchored on the substantive

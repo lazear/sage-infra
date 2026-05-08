@@ -1,10 +1,13 @@
-# sage-infra runner: thin debian image carrying a fresh `sage` binary plus the
+# sage-infra runner: thin ubuntu image carrying a fresh `sage` binary plus the
 # wrapper that executes one (commit x dataset) benchmark on AWS Batch.
 #
 # The build context is expected to contain:
 #   ./sage         pre-built x86_64-linux-gnu release binary (built by GH Actions)
 #   ./wrapper.py   from runner/wrapper.py
-FROM debian:bookworm-slim
+#
+# Base must match the GH Actions runner's glibc (ubuntu-latest -> 24.04 / 2.39).
+# If you pin runs-on to ubuntu-22.04, drop this back to debian:bookworm-slim.
+FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
