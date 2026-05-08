@@ -1,0 +1,6 @@
+description: TMT vs LFQ benchmark set (TMT samples)
+batch:
+  vcpu: 16
+  memory_mib: 32768
+tags:
+  - tmt
