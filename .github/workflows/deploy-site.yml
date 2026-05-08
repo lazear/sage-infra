@@ -1,0 +1,50 @@
+name: deploy-site
+
+on:
+  push:
+    branches: [master, main]
+    paths:
+      - 'site/**'
+      - '.github/workflows/deploy-site.yml'
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy-site
+  cancel-in-progress: true
+
+env:
+  AWS_REGION:   ${{ vars.AWS_REGION }}
+  AWS_ROLE_ARN: ${{ vars.AWS_BENCHMARK_ROLE_ARN }}
+  STACK_NAME:   ${{ vars.STACK_NAME || 'SageInfraStack' }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region:     ${{ env.AWS_REGION }}
+
+      - uses: ./.github/actions/load-stack-outputs
+        with:
+          stack-name: ${{ env.STACK_NAME }}
+
+      - name: Sync static site
+        run: |
+          aws s3 sync site/ "s3://${RESULTS_BUCKET}/site/" --delete \
+            --cache-control 'public, max-age=300'
+
+      - name: Invalidate CloudFront
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id "$CLOUDFRONT_ID" \
+            --paths '/' '/site/*'
