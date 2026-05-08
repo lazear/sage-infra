@@ -1,6 +1,6 @@
 description: IonStar quantitivative proteomics dataset
 batch:
-  vcpu: 16
-  memory_mib: 32768
+  vcpu: 4
+  memory_mib: 16384
 tags:
   - lfq

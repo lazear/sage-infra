@@ -1,0 +1,68 @@
+{
+  "database": {
+    "bucket_size": 8192,
+    "enzyme": {
+      "missed_cleavages": 0,
+      "min_len": 7,
+      "max_len": 15,
+      "cleave_at": "",
+      "restrict": null,
+      "c_terminal": true
+    },
+    "peptide_min_mass": 600.0,
+    "peptide_max_mass": 2500.0,
+    "ion_kinds": [
+      "b",
+      "y"
+    ],
+    "min_ion_index": 2,
+    "static_mods": {
+      "C": 57.0215
+    },
+    "variable_mods": {
+      "M": [
+        15.9949
+      ]
+    },
+    "max_variable_mods": 1,
+    "decoy_tag": "rev_",
+    "generate_decoys": true,
+    "fasta": "s3://${DATA_BUCKET}/datasets/${PXD}/${PXD}.fasta"
+    "prefilter": true,
+    "prefilter_chunk_size": 0,
+    "prefilter_low_memory": true
+  },
+  "precursor_tol": {
+    "ppm": [
+      -10.0,
+      10.0
+    ]
+  },
+  "fragment_tol": {
+    "ppm": [
+      -20.0,
+      20.0
+    ]
+  },
+  "precursor_charge": [
+    1,
+    4
+  ],
+  "isotope_errors": [
+    -1,
+    2
+  ],
+  "deisotope": true,
+  "chimera": false,
+  "min_peaks": 10,
+  "max_peaks": 150,
+  "min_matched_peaks": 4,
+  "max_fragment_charge": 2,
+  "report_psms": 1,
+  "predict_rt": false,
+  "mzml_paths": [
+    "s3://${DATA_BUCKET}/datasets/${PXD}/TIMSIM-DDA-HLA-10K-G40-001.d",
+    "s3://${DATA_BUCKET}/datasets/${PXD}/TIMSIM-DDA-HLA-10K-G40-002.d",
+    "s3://${DATA_BUCKET}/datasets/${PXD}/TIMSIM-DDA-HLA-10K-G40-003.d"
+  ]
+}
