@@ -1,0 +1,6 @@
+description: HeLa open-search dataset
+batch:
+  vcpu: 16
+  memory_mib: 32768
+tags:
+  - open-search
