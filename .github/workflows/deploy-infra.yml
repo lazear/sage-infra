@@ -57,7 +57,7 @@ jobs:
       - run: npm ci
 
       - run: npx cdk diff || true
-      - run: npx cdk deploy --require-approval never --outputs-file ../cdk-outputs.json
+      - run: npx cdk deploy --require-approval never --outputs-file cdk-outputs.json
 
       - name: Show stack outputs
         run: cat cdk-outputs.json
