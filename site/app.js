@@ -12,10 +12,13 @@ function app() {
     sortDir: 'desc',
     filterDataset: '',
     charts: {},
+    renderTimer: null,
 
     async init() {
       await this.load();
-      this.$watch('tab', (v) => v === 'history' && this.$nextTick(() => this.renderCharts()));
+      this.$watch('tab', (v) => {
+        if (v === 'history') this.scheduleRenderCharts();
+      });
     },
 
     async load() {
@@ -63,6 +66,16 @@ function app() {
       for (const ds of this.datasets) this.renderDatasetCharts(ds);
     },
 
+    scheduleRenderCharts() {
+      if (this.renderTimer) cancelAnimationFrame(this.renderTimer);
+      this.renderTimer = requestAnimationFrame(() => {
+        this.renderTimer = requestAnimationFrame(() => {
+          this.renderTimer = null;
+          this.renderCharts();
+        });
+      });
+    },
+
     renderDatasetCharts(ds) {
       const series = this.docs
         .filter(r => r.dataset === ds && r.exit_code === 0)
@@ -83,35 +96,41 @@ function app() {
     },
 
     makeChart(canvasId, label, data) {
-      const ctx = document.getElementById(canvasId);
+      const canvas = document.getElementById(canvasId);
+      if (!(canvas instanceof HTMLCanvasElement)) return;
+      const ctx = canvas.getContext('2d');
       if (!ctx) return;
       if (this.charts[canvasId]) this.charts[canvasId].destroy();
-      this.charts[canvasId] = new Chart(ctx, {
-        type: 'line',
-        data: { datasets: [{ label, data, borderWidth: 2, tension: 0.2, pointRadius: 3 }] },
-        options: {
-          responsive: true, maintainAspectRatio: false,
-          parsing: false,
-          scales: {
-            x: { type: 'time', time: { tooltipFormat: 'PPpp' } },
-            y: { beginAtZero: false },
-          },
-          plugins: {
-            tooltip: {
-              callbacks: {
-                title: (items) => items[0].raw.commit + ' — ' + (items[0].raw.message || ''),
-                label: (item) => `${item.dataset.label}: ${fmtNumber(item.parsed.y)}`,
-              },
+      try {
+        this.charts[canvasId] = new Chart(ctx, {
+          type: 'line',
+          data: { datasets: [{ label, data, borderWidth: 2, tension: 0.2, pointRadius: 3 }] },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            parsing: false,
+            scales: {
+              x: { type: 'time', time: { tooltipFormat: 'PPpp' } },
+              y: { beginAtZero: false },
             },
-            legend: { display: true, position: 'top' },
+            plugins: {
+              tooltip: {
+                callbacks: {
+                  title: (items) => items[0].raw.commit + ' — ' + (items[0].raw.message || ''),
+                  label: (item) => `${item.dataset.label}: ${fmtNumber(item.parsed.y)}`,
+                },
+              },
+              legend: { display: true, position: 'top' },
+            },
+            onClick: (_e, els) => {
+              if (!els.length) return;
+              const p = els[0].element.$context.raw;
+              if (p?.commitUrl) window.open(p.commitUrl, '_blank');
+            },
           },
-          onClick: (_e, els) => {
-            if (!els.length) return;
-            const p = els[0].element.$context.raw;
-            if (p?.commitUrl) window.open(p.commitUrl, '_blank');
-          },
-        },
-      });
+        });
+      } catch (e) {
+        console.warn(`failed to render chart ${canvasId}`, e);
+      }
     },
 
     fmt(v) { return v == null ? '—' : v.toLocaleString(); },
