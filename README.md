@@ -8,7 +8,7 @@ Continuous benchmark CI for [Sage](https://github.com/lazear/sage). On every pus
 .github/workflows/    GH Actions: build + fanout + finalize, plus infra deploy
 infra/                AWS CDK stack (ECR, Batch, S3 x2, CloudFront, IAM)
 runner/               Docker image used by Batch jobs (sage + python wrapper)
-site/                 Static dashboard (Alpine + Chart.js, no build step)
+site/                 Static dashboard (Alpine + inline SVG charts, no build step)
 datasets/<PXD>/       Per-dataset sage params (config.json) + optional meta.yaml
 scripts/              Operator helpers (upload mzML/FASTA to S3)
 sage-dispatch/        Workflow file to copy into the upstream Sage repo
