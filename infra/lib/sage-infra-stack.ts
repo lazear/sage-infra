@@ -200,6 +200,12 @@ export class SageInfraStack extends cdk.Stack {
       actions: ['iam:PassRole'],
       resources: [taskRole.roleArn, executionRole.roleArn],
     }));
+    // load-stack-outputs composite action discovers bucket/queue/role names
+    // from this stack's CFN outputs at workflow run time.
+    benchmarkRole.addToPolicy(new iam.PolicyStatement({
+      actions: ['cloudformation:DescribeStacks'],
+      resources: [`arn:aws:cloudformation:${this.region}:${this.account}:stack/${this.stackName}/*`],
+    }));
 
     // Deploy role (used by deploy-infra.yml) — broad perms, restricted to the
     // default branch. Override `defaultBranch` in cdk.context.json for forks.
