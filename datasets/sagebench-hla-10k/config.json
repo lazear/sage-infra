@@ -27,7 +27,7 @@
     "max_variable_mods": 1,
     "decoy_tag": "rev_",
     "generate_decoys": true,
-    "fasta": "s3://${DATA_BUCKET}/datasets/${PXD}/${PXD}.fasta"
+    "fasta": "s3://${DATA_BUCKET}/datasets/${PXD}/${PXD}.fasta",
     "prefilter": true,
     "prefilter_chunk_size": 0,
     "prefilter_low_memory": true
