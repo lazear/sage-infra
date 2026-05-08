@@ -1,23 +1,28 @@
 #!/usr/bin/env bash
-# Upload a local dataset folder (config.json + mzMLs + FASTA) to the data bucket.
-# Authoring conventions:
-#   * The folder contains exactly one config.json
-#   * config.json references mzML/FASTA paths as s3://${DATA_BUCKET}/datasets/${DATASET}/<filename>
-#   * Sage reads s3:// paths natively; the runner only needs config.json on local disk
+# Upload a local dataset's mzML files + FASTA to the data bucket.
+#
+# The sage config.json now lives in git at datasets/<PXD>/config.json — this
+# script only ships the heavy data files. Use ${DATA_BUCKET} placeholders in
+# the committed config to refer to s3://${DATA_BUCKET}/datasets/<PXD>/<file>.
 #
 # Usage:   DATA_BUCKET=sage-infra-data-… ./scripts/upload-dataset.sh PXD001468 ./local/PXD001468
+#
+# The local folder may contain any mix of:
+#   *.mzML  *.mzML.gz  *.mzparquet  *.fasta  *.fasta.gz
 set -euo pipefail
 
 DATASET="${1:?dataset id required (e.g. PXD001468)}"
 LOCAL="${2:?path to local dataset folder required}"
 : "${DATA_BUCKET:?DATA_BUCKET env var required}"
 
-if [ ! -f "$LOCAL/config.json" ]; then
-  echo "expected $LOCAL/config.json"; exit 1
-fi
-
 DEST="s3://${DATA_BUCKET}/datasets/${DATASET}/"
 echo "→ $DEST"
-aws s3 sync "$LOCAL/" "$DEST" --exclude '.DS_Store' --exclude '*.tmp' --size-only
+aws s3 sync "$LOCAL/" "$DEST" \
+  --exclude '*' \
+  --include '*.mzML' --include '*.mzML.gz' --include '*.mzparquet' \
+  --include '*.fasta' --include '*.fasta.gz' \
+  --size-only
 
-echo "done. register with: scripts/register-dataset.sh ${DATASET}"
+echo
+echo "next: add datasets/${DATASET}/config.json (and optional meta.yaml) to git,"
+echo "      then push. The benchmark workflow will stage it per commit."

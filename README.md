@@ -9,9 +9,47 @@ Continuous benchmark CI for [Sage](https://github.com/lazear/sage). On every pus
 infra/                AWS CDK stack (ECR, Batch, S3 x2, CloudFront, IAM)
 runner/               Docker image used by Batch jobs (sage + python wrapper)
 site/                 Static dashboard (Alpine + Chart.js, no build step)
-scripts/              Operator helpers (upload a dataset, register a dataset)
+datasets/<PXD>/       Per-dataset sage params (config.json) + optional meta.yaml
+scripts/              Operator helpers (upload mzML/FASTA to S3)
 sage-dispatch/        Workflow file to copy into the upstream Sage repo
 ```
+
+## Datasets
+
+Each benchmark dataset lives in its own directory under `datasets/`:
+
+```
+datasets/PXD001468/
+  config.json        # sage parameters; uses ${DATA_BUCKET} / ${PXD} placeholders
+  meta.yaml          # optional: Batch resource overrides + description
+```
+
+`config.json` example:
+```json
+{
+  "database": {
+    "fasta": "s3://${DATA_BUCKET}/datasets/${PXD}/uniprot-human.fasta"
+  },
+  "mzml_paths": [
+    "s3://${DATA_BUCKET}/datasets/${PXD}/run01.mzML.gz",
+    "s3://${DATA_BUCKET}/datasets/${PXD}/run02.mzML.gz"
+  ],
+  "precursor_tol": { "ppm": [-50, 50] },
+  "fragment_tol":  { "ppm": [-20, 20] }
+}
+```
+
+`meta.yaml` is optional — defaults are 4 vCPU / 30 GB:
+```yaml
+description: "Mann lab HeLa, isobaric labeled, 24-fraction"
+batch:
+  vcpu: 8
+  memory_mib: 32768
+```
+
+Adding a dataset = uploading the heavy files once, then a PR. Removing one = deleting the directory in a PR. The mzML / FASTA stay in S3 either way (cheap to keep, painful to re-upload).
+
+The benchmark workflow stages each `config.json` to `s3://<data-bucket>/staging/<sage-commit>/<PXD>/config.json` per run, so a Sage commit is always benchmarked against the config that was committed at that moment in `sage-infra` history (recorded as `sage_infra_commit` in the result JSON).
 
 ## Bootstrapping
 
@@ -35,10 +73,16 @@ sage-dispatch/        Workflow file to copy into the upstream Sage repo
    - `STACK_NAME` — optional; defaults to `SageInfraStack`
 
    Everything else (ECR URI, bucket names, queue/jobdef names, CloudFront ID, task/execution role ARNs) is fetched on demand by `.github/actions/load-stack-outputs` from the CloudFormation stack.
-5. Upload at least one dataset:
+5. Add at least one dataset:
    ```sh
-   scripts/upload-dataset.sh PXD001468 ./local-PXD001468/
-   scripts/register-dataset.sh PXD001468
+   # Heavy files go to S3 once:
+   DATA_BUCKET=<your-data-bucket> scripts/upload-dataset.sh PXD001468 ./local-PXD001468/
+
+   # Sage params travel with git:
+   mkdir -p datasets/PXD001468
+   $EDITOR datasets/PXD001468/config.json   # see "Datasets" section above
+   $EDITOR datasets/PXD001468/meta.yaml     # optional
+   git add datasets/PXD001468 && git commit -m "add PXD001468"
    ```
-6. Copy `sage-dispatch/sage-infra-dispatch.yml` into the Sage repo at `.github/workflows/`. Add `SAGE_INFRA_DISPATCH_TOKEN` (PAT with `repo` scope on `<owner>/sage-infra`) to the Sage repo's secrets.
+6. Set up the GitHub App for cross-repo dispatch (one-time, see `sage-dispatch/README.md`), then copy `sage-dispatch/sage-infra-dispatch.yml` into the Sage repo at `.github/workflows/`.
 7. Push a commit to Sage `master`. Watch the run in this repo's Actions tab. Visit the CloudFront URL.

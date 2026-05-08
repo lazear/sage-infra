@@ -57,6 +57,14 @@ export class SageInfraStack extends cdk.Stack {
       encryption: s3.BucketEncryption.S3_MANAGED,
       versioned: true,
       enforceSSL: true,
+      lifecycleRules: [
+        {
+          // Per-commit config snapshots are write-once, read-once-per-run.
+          id: 'expire-staging',
+          prefix: 'staging/',
+          expiration: Duration.days(30),
+        },
+      ],
       removalPolicy: RemovalPolicy.RETAIN,
     });
 
@@ -180,6 +188,7 @@ export class SageInfraStack extends cdk.Stack {
     });
     ecrRepo.grantPullPush(benchmarkRole);
     dataBucket.grantRead(benchmarkRole);
+    dataBucket.grantPut(benchmarkRole, 'staging/*');
     resultsBucket.grantReadWrite(benchmarkRole);
     benchmarkRole.addToPolicy(new iam.PolicyStatement({
       actions: [

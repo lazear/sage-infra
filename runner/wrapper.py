@@ -128,17 +128,19 @@ def main() -> int:
     data_bucket = env("DATA_BUCKET")
     results_bucket = env("RESULTS_BUCKET")
 
-    image_uri        = os.environ.get("IMAGE_URI", "")
-    sage_repo        = os.environ.get("SAGE_REPO", "lazear/sage")
-    commit_message   = os.environ.get("COMMIT_MESSAGE", "")
-    commit_author    = os.environ.get("COMMIT_AUTHOR", "")
-    commit_timestamp = os.environ.get("COMMIT_TIMESTAMP", "")
-    batch_job_id     = os.environ.get("AWS_BATCH_JOB_ID", "")
+    image_uri          = os.environ.get("IMAGE_URI", "")
+    sage_repo          = os.environ.get("SAGE_REPO", "lazear/sage")
+    commit_message     = os.environ.get("COMMIT_MESSAGE", "")
+    commit_author      = os.environ.get("COMMIT_AUTHOR", "")
+    commit_timestamp   = os.environ.get("COMMIT_TIMESTAMP", "")
+    batch_job_id       = os.environ.get("AWS_BATCH_JOB_ID", "")
+    sage_infra_commit  = os.environ.get("SAGE_INFRA_COMMIT", "")
 
     s3 = boto3.client("s3")
 
     started_at = now_iso()
-    cfg_uri = f"s3://{data_bucket}/datasets/{dataset}/config.json"
+    # Configs live in git and are staged by the build job to a per-commit prefix.
+    cfg_uri = f"s3://{data_bucket}/staging/{commit}/{dataset}/config.json"
     print(f"[wrapper] config: {cfg_uri}", flush=True)
     version_str = sage_version()
     exit_code, log, wall_seconds, peak_kb = run_sage(cfg_uri)
@@ -159,6 +161,7 @@ def main() -> int:
         "duration_seconds": round(wall_seconds, 3),
         "peak_memory_kb": peak_kb,
         "sage_version": version_str,
+        "sage_infra_commit": sage_infra_commit,
         "image_uri": image_uri,
         "batch_job_id": batch_job_id,
         "exit_code": exit_code,

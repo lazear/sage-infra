@@ -112,14 +112,40 @@ jobs:
           docker push "$IMAGE_URI"
           echo "image_uri=$IMAGE_URI" >> "$GITHUB_OUTPUT"
 
+      - name: Stage configs to S3 + build dataset matrix
+        id: datasets
+        env:
+          SHA: ${{ steps.meta.outputs.sha }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          DATASETS=()
+          for cfg in datasets/*/config.json; do
+            PXD=$(basename "$(dirname "$cfg")")
+            DEST="s3://${DATA_BUCKET}/staging/${SHA}/${PXD}/config.json"
+            echo "→ $DEST"
+            # Substitute only the symbols we declare; leave any other ${...} alone.
+            PXD="$PXD" DATA_BUCKET="$DATA_BUCKET" \
+              envsubst '${DATA_BUCKET} ${PXD}' <"$cfg" \
+              | aws s3 cp - "$DEST" --content-type application/json
+            DATASETS+=("$PXD")
+          done
+          if [ ${#DATASETS[@]} -eq 0 ]; then
+            echo "no datasets/<PXD>/config.json files found in repo"; exit 1
+          fi
+          LIST=$(printf '%s\n' "${DATASETS[@]}" | jq -R . | jq -sc .)
+          echo "list=$LIST" >> "$GITHUB_OUTPUT"
+          echo "datasets to run: $LIST"
+
       - name: Register Batch job-definition revision
         id: regdef
         env:
-          SHA:       ${{ steps.meta.outputs.sha }}
-          IMAGE_URI: ${{ steps.image.outputs.image_uri }}
-          MSG:       ${{ steps.meta.outputs.message }}
-          AUTHOR:    ${{ steps.meta.outputs.author }}
-          TS:        ${{ steps.meta.outputs.timestamp }}
+          SHA:               ${{ steps.meta.outputs.sha }}
+          IMAGE_URI:         ${{ steps.image.outputs.image_uri }}
+          MSG:               ${{ steps.meta.outputs.message }}
+          AUTHOR:            ${{ steps.meta.outputs.author }}
+          TS:                ${{ steps.meta.outputs.timestamp }}
+          SAGE_INFRA_COMMIT: ${{ github.sha }}
         run: |
           set -euo pipefail
           jq -n \
@@ -133,6 +159,7 @@ jobs:
             --arg msg "$MSG" \
             --arg author "$AUTHOR" \
             --arg ts "$TS" \
+            --arg infraCommit "$SAGE_INFRA_COMMIT" \
             '{
               image: $image,
               command: ["python3","/usr/local/bin/wrapper.py"],
@@ -150,14 +177,15 @@ jobs:
               },
               ephemeralStorage: { sizeInGiB: 100 },
               environment: [
-                { name: "DATA_BUCKET",      value: $dataBucket },
-                { name: "RESULTS_BUCKET",   value: $resultsBucket },
-                { name: "SAGE_REPO",        value: $sageRepo },
-                { name: "IMAGE_URI",        value: $image },
-                { name: "COMMIT",           value: $commit },
-                { name: "COMMIT_MESSAGE",   value: $msg },
-                { name: "COMMIT_AUTHOR",    value: $author },
-                { name: "COMMIT_TIMESTAMP", value: $ts }
+                { name: "DATA_BUCKET",        value: $dataBucket },
+                { name: "RESULTS_BUCKET",     value: $resultsBucket },
+                { name: "SAGE_REPO",          value: $sageRepo },
+                { name: "IMAGE_URI",          value: $image },
+                { name: "COMMIT",             value: $commit },
+                { name: "COMMIT_MESSAGE",     value: $msg },
+                { name: "COMMIT_AUTHOR",      value: $author },
+                { name: "COMMIT_TIMESTAMP",   value: $ts },
+                { name: "SAGE_INFRA_COMMIT",  value: $infraCommit }
               ]
             }' > /tmp/container.json
 
@@ -171,15 +199,6 @@ jobs:
               --retry-strategy 'attempts=2' \
               --query 'revision' --output text)
           echo "jobdef=${BATCH_JOB_DEF}:${REV}" >> "$GITHUB_OUTPUT"
-
-      - name: Read dataset list
-        id: datasets
-        run: |
-          set -euo pipefail
-          aws s3 cp "s3://${DATA_BUCKET}/datasets/index.json" /tmp/datasets.json
-          LIST=$(jq -c '[.[].id]' /tmp/datasets.json)
-          echo "list=$LIST" >> "$GITHUB_OUTPUT"
-          echo "datasets to run: $LIST"
 
   run:
     needs: build
@@ -202,17 +221,45 @@ jobs:
         with:
           stack-name: ${{ env.STACK_NAME }}
 
+      - name: Read per-dataset Batch overrides from meta.yaml
+        id: ds_meta
+        env:
+          DATASET: ${{ matrix.dataset }}
+        run: |
+          set -euo pipefail
+          META="datasets/${DATASET}/meta.yaml"
+          if [ -f "$META" ]; then
+            VCPU=$(yq '.batch.vcpu // 4' "$META")
+            MEM=$(yq '.batch.memory_mib // 30720' "$META")
+          else
+            VCPU=4; MEM=30720
+          fi
+          echo "vcpu=$VCPU"   >> "$GITHUB_OUTPUT"
+          echo "memory=$MEM"  >> "$GITHUB_OUTPUT"
+          echo "[$DATASET] vcpu=$VCPU memory_mib=$MEM"
+
       - name: Submit Batch job for ${{ matrix.dataset }}
         id: submit
         env:
           DATASET: ${{ matrix.dataset }}
           JOBDEF:  ${{ needs.build.outputs.jobdef }}
           SHA:     ${{ needs.build.outputs.sha }}
+          VCPU:    ${{ steps.ds_meta.outputs.vcpu }}
+          MEM:     ${{ steps.ds_meta.outputs.memory }}
         run: |
           set -euo pipefail
           SHORT="${SHA:0:7}"
-          OVERRIDES=$(jq -nc --arg ds "$DATASET" \
-            '{ environment: [ { name: "DATASET", value: $ds } ] }')
+          OVERRIDES=$(jq -nc \
+            --arg ds "$DATASET" \
+            --arg vcpu "$VCPU" \
+            --arg mem  "$MEM" \
+            '{
+              environment: [ { name: "DATASET", value: $ds } ],
+              resourceRequirements: [
+                { type: "VCPU",   value: $vcpu },
+                { type: "MEMORY", value: $mem }
+              ]
+            }')
           JOB_ID=$(aws batch submit-job \
               --job-name "sage-infra-${SHORT}-${DATASET}" \
               --job-queue "$BATCH_QUEUE" \
