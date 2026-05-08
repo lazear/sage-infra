@@ -98,9 +98,9 @@
             <th @click="sortBy('commit_timestamp')">when</th>
             <th @click="sortBy('commit')">commit</th>
             <th @click="sortBy('dataset')">dataset</th>
-            <th @click="sortBy('psms_1pct_fdr')" class="num">PSMs</th>
-            <th @click="sortBy('peptides_1pct_fdr')" class="num">peptides</th>
-            <th @click="sortBy('proteins_1pct_fdr')" class="num">proteins</th>
+            <th @click="sortBy('psms')" class="num">PSMs</th>
+            <th @click="sortBy('peptides')" class="num">peptides</th>
+            <th @click="sortBy('proteins')" class="num">proteins</th>
             <th @click="sortBy('duration_seconds')" class="num">runtime</th>
             <th @click="sortBy('peak_memory_kb')" class="num">RSS</th>
             <th>status</th>
@@ -112,9 +112,9 @@
               <td x-text="fmtDate(r.commit_timestamp || r.started_at)"></td>
               <td><a :href="r.commit_url" target="_blank" x-text="r.commit_short" :title="r.commit_message"></a></td>
               <td x-text="r.dataset"></td>
-              <td class="num" x-text="fmt(r.psms_1pct_fdr)"></td>
-              <td class="num" x-text="fmt(r.peptides_1pct_fdr)"></td>
-              <td class="num" x-text="fmt(r.proteins_1pct_fdr)"></td>
+              <td class="num" x-text="fmt(r.psms)"></td>
+              <td class="num" x-text="fmt(r.peptides)"></td>
+              <td class="num" x-text="fmt(r.proteins)"></td>
               <td class="num" x-text="fmtDuration(r.duration_seconds)"></td>
               <td class="num" x-text="fmtMem(r.peak_memory_kb)"></td>
               <td x-text="r.exit_code === 0 ? 'OK' : 'FAILED'"></td>
